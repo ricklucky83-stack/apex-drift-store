@@ -1,11 +1,64 @@
 {
-  "version": "1.0",
-  "last_updated": null,
-  "regime_memory": {},
-  "ownership_drift": [],
-  "salary_efficiency": [],
-  "cpt_fragility_signals": [],
-  "structural_bias_clusters": [],
-  "cross_sport_drift": [],
-  "notes": []
+  "version": "2.0",
+  "last_updated_utc": null,
+  "source": {
+    "repo": "ricklucky83-stack/apex-drift-store",
+    "path": "drift_store_master.json",
+    "pinned_commit": null
+  },
+
+  "identity": {
+    "player_master_hash": null,
+    "name_collision_watchlist": [],
+    "id_rules": {
+      "primary_key_order": ["player_master_id", "dk_player_id", "name_team_pos_hash"],
+      "disallow_name_only": true
+    }
+  },
+
+  "temporal_anchor": {
+    "contest_id_to_slate": [],
+    "last_ingested_entry_history_utc": null
+  },
+
+  "regime_memory": {
+    "rules_version": "1.0",
+    "regimes": []
+  },
+
+  "drift": {
+    "ownership": {
+      "by_sport_site_slot": [],
+      "by_archetype": [],
+      "partial_observed_events": []
+    },
+    "cross_sport": []
+  },
+
+  "struct_bias": {
+    "contest_summary": [],
+    "core_lift": [],
+    "ownership": [],
+    "daruler83_core": []
+  },
+
+  "fragility": {
+    "cpt_fragility_signals": [],
+    "shock_events": []
+  },
+
+  "salary_efficiency": {
+    "entry_history_index": [],
+    "leftover_distributions": [],
+    "daruler83_leftover_delta": []
+  },
+
+  "backlog": {
+    "pending_symbols": [],
+    "needs_fetch": [],
+    "needs_verify": [],
+    "resolved_events": []
+  },
+
+  "audit_log": []
 }
