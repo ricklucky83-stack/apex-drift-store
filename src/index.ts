@@ -4,6 +4,7 @@ import { z } from "zod";
 
 interface Env {
   OPENAI_API_KEY: string;
+  APEX_RELAY_TOKEN: string;
 }
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -12,7 +13,7 @@ const ALLOWED_MODEL = "gpt-6-astra";
 function buildServer(env: Env) {
   const server = new McpServer({
     name: "APEX GPT-6 Transport",
-    version: "1.0.0",
+    version: "1.1.0",
   });
 
   server.registerTool(
@@ -38,7 +39,7 @@ function buildServer(env: Env) {
       const upstream = await fetch(OPENAI_RESPONSES_URL, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
@@ -75,6 +76,24 @@ function buildServer(env: Env) {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    if (!env.APEX_RELAY_TOKEN) {
+      return new Response("APEX_RELAY_TOKEN_MISSING", {
+        status: 500,
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+
+    const authorization = request.headers.get("Authorization") ?? "";
+    if (authorization !== `Bearer ${env.APEX_RELAY_TOKEN}`) {
+      return new Response("Unauthorized", {
+        status: 401,
+        headers: {
+          "Cache-Control": "no-store",
+          "WWW-Authenticate": 'Bearer realm="APEX GPT-6 Transport"',
+        },
+      });
+    }
+
     return createMcpHandler(buildServer(env))(request, env, ctx);
   },
 };
