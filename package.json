@@ -1,0 +1,19 @@
+{
+  "name": "apex-gpt6-transport",
+  "description": "Stateless authenticated transport boundary for frozen APEX GPT-6 Astra handoff payloads",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "agents": "*",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260729.1",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.115.0"
+  }
+}
