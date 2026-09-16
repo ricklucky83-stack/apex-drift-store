@@ -5,6 +5,6 @@
   "compatibility_date": "2026-09-16",
   "compatibility_flags": ["nodejs_compat"],
   "secrets": {
-    "required": ["OPENAI_API_KEY"]
+    "required": ["OPENAI_API_KEY", "APEX_RELAY_TOKEN"]
   }
 }
