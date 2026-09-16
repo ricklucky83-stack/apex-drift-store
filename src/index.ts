@@ -9,8 +9,19 @@ interface Env {
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const ALLOWED_MODEL = "gpt-6-astra";
-const RELAY_VERSION = "1.2.0";
+const RELAY_VERSION = "1.3.0";
 const SELF_TEST_OK = "APEX_RELAY_OK";
+
+type DiagnosticResult = {
+  result: "PASS" | "FAIL";
+  stage: string;
+  reason: string;
+  model: string;
+  openai_response_id: string | null;
+  request_sha256: string | null;
+  openai_error_type?: string | null;
+  openai_error_code?: string | null;
+};
 
 const SELF_TEST_HTML = `<!doctype html>
 <html lang="en">
@@ -19,19 +30,19 @@ const SELF_TEST_HTML = `<!doctype html>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>APEX GPT-6 Relay Self-Test</title>
   <style>
-    body{font-family:system-ui,-apple-system,sans-serif;max-width:640px;margin:48px auto;padding:0 18px;background:#0b0d10;color:#f4f6f8}
+    body{font-family:system-ui,-apple-system,sans-serif;max-width:680px;margin:48px auto;padding:0 18px;background:#0b0d10;color:#f4f6f8}
     .card{background:#151922;border:1px solid #2b3240;border-radius:14px;padding:22px}
     input,button{box-sizing:border-box;width:100%;font:inherit;border-radius:9px;padding:12px}
     input{background:#0f131a;color:#fff;border:1px solid #3a4456;margin:10px 0 12px}
     button{border:0;background:#fff;color:#111;font-weight:700;cursor:pointer}
-    pre{white-space:pre-wrap;word-break:break-word;background:#0f131a;border-radius:9px;padding:12px;min-height:64px}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0f131a;border-radius:9px;padding:12px;min-height:100px}
     small{color:#aeb7c5}
   </style>
 </head>
 <body>
   <div class="card">
     <h1>APEX GPT-6 Relay Self-Test</h1>
-    <small>Relay ${RELAY_VERSION}. Token is sent only in the Authorization Bearer header and is never placed in the URL.</small>
+    <small>Relay ${RELAY_VERSION}. The relay token is sent only in the Authorization Bearer header and is never placed in the URL. Secret values are never returned.</small>
     <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste APEX_RELAY_TOKEN" />
     <button id="run">Run self-test</button>
     <pre id="out">READY</pre>
@@ -42,7 +53,10 @@ const SELF_TEST_HTML = `<!doctype html>
     const runEl = document.getElementById('run');
     runEl.addEventListener('click', async () => {
       const token = tokenEl.value;
-      if (!token) { outEl.textContent = 'FAIL'; return; }
+      if (!token) {
+        outEl.textContent = JSON.stringify({ result: 'FAIL', stage: 'TOKEN_GATE', reason: 'TOKEN_NOT_PROVIDED' }, null, 2);
+        return;
+      }
       runEl.disabled = true;
       outEl.textContent = 'RUNNING';
       try {
@@ -54,7 +68,7 @@ const SELF_TEST_HTML = `<!doctype html>
         const j = await r.json();
         outEl.textContent = JSON.stringify(j, null, 2);
       } catch (_) {
-        outEl.textContent = JSON.stringify({ result: 'FAIL' }, null, 2);
+        outEl.textContent = JSON.stringify({ result: 'FAIL', stage: 'BROWSER_REQUEST', reason: 'SELF_TEST_RESPONSE_UNAVAILABLE' }, null, 2);
       } finally {
         runEl.disabled = false;
       }
@@ -79,6 +93,13 @@ function unauthorized(): Response {
   });
 }
 
+function diagnostic(body: DiagnosticResult, status = 200): Response {
+  return Response.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
@@ -95,6 +116,14 @@ function extractOutputText(obj: any): string {
   return parts.join("");
 }
 
+function safeOpenAIError(obj: any): { type: string | null; code: string | null } {
+  const error = obj && typeof obj === "object" ? obj.error : null;
+  return {
+    type: typeof error?.type === "string" ? error.type : null,
+    code: typeof error?.code === "string" ? error.code : null,
+  };
+}
+
 async function runSelfTest(env: Env): Promise<Response> {
   const payload = {
     model: ALLOWED_MODEL,
@@ -105,44 +134,111 @@ async function runSelfTest(env: Env): Promise<Response> {
   const body = JSON.stringify(payload);
   const requestSha = await sha256Hex(body);
 
-  let openaiResponseId: string | null = null;
-  let result: "PASS" | "FAIL" = "FAIL";
-
-  if (env.OPENAI_API_KEY) {
-    try {
-      const upstream = await fetch(OPENAI_RESPONSES_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      });
-
-      const text = await upstream.text();
-      if (upstream.ok) {
-        try {
-          const obj = JSON.parse(text);
-          openaiResponseId = typeof obj?.id === "string" ? obj.id : null;
-          result = extractOutputText(obj).trim() === SELF_TEST_OK ? "PASS" : "FAIL";
-        } catch {
-          result = "FAIL";
-        }
-      }
-    } catch {
-      result = "FAIL";
-    }
+  if (!env.OPENAI_API_KEY) {
+    return diagnostic({
+      result: "FAIL",
+      stage: "WORKER_CONFIG",
+      reason: "OPENAI_API_KEY_MISSING",
+      model: ALLOWED_MODEL,
+      openai_response_id: null,
+      request_sha256: requestSha,
+    });
   }
 
-  return Response.json(
-    {
-      result,
+  let upstream: Response;
+  try {
+    upstream = await fetch(OPENAI_RESPONSES_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+  } catch {
+    return diagnostic({
+      result: "FAIL",
+      stage: "OPENAI_REQUEST",
+      reason: "NETWORK_ERROR",
+      model: ALLOWED_MODEL,
+      openai_response_id: null,
+      request_sha256: requestSha,
+    });
+  }
+
+  const text = await upstream.text();
+  let obj: any;
+  try {
+    obj = JSON.parse(text);
+  } catch {
+    return diagnostic({
+      result: "FAIL",
+      stage: "OPENAI_RESPONSE",
+      reason: upstream.ok ? "INVALID_JSON" : `OPENAI_HTTP_${upstream.status}`,
+      model: ALLOWED_MODEL,
+      openai_response_id: null,
+      request_sha256: requestSha,
+    });
+  }
+
+  const openaiResponseId = typeof obj?.id === "string" ? obj.id : null;
+
+  if (!upstream.ok) {
+    const safeError = safeOpenAIError(obj);
+    return diagnostic({
+      result: "FAIL",
+      stage: "OPENAI_REQUEST",
+      reason: `OPENAI_HTTP_${upstream.status}`,
       model: ALLOWED_MODEL,
       openai_response_id: openaiResponseId,
       request_sha256: requestSha,
-    },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+      openai_error_type: safeError.type,
+      openai_error_code: safeError.code,
+    });
+  }
+
+  if (!obj || typeof obj !== "object") {
+    return diagnostic({
+      result: "FAIL",
+      stage: "OPENAI_RESPONSE",
+      reason: "INVALID_RESPONSE",
+      model: ALLOWED_MODEL,
+      openai_response_id: openaiResponseId,
+      request_sha256: requestSha,
+    });
+  }
+
+  if (typeof obj.model === "string" && obj.model !== ALLOWED_MODEL) {
+    return diagnostic({
+      result: "FAIL",
+      stage: "MODEL_CHECK",
+      reason: "MODEL_MISMATCH",
+      model: typeof obj.model === "string" ? obj.model : ALLOWED_MODEL,
+      openai_response_id: openaiResponseId,
+      request_sha256: requestSha,
+    });
+  }
+
+  const output = extractOutputText(obj).trim();
+  if (output !== SELF_TEST_OK) {
+    return diagnostic({
+      result: "FAIL",
+      stage: "OUTPUT_CHECK",
+      reason: output ? "OUTPUT_MISMATCH" : "OUTPUT_MISSING",
+      model: typeof obj.model === "string" ? obj.model : ALLOWED_MODEL,
+      openai_response_id: openaiResponseId,
+      request_sha256: requestSha,
+    });
+  }
+
+  return diagnostic({
+    result: "PASS",
+    stage: "COMPLETE",
+    reason: SELF_TEST_OK,
+    model: typeof obj.model === "string" ? obj.model : ALLOWED_MODEL,
+    openai_response_id: openaiResponseId,
+    request_sha256: requestSha,
+  });
 }
 
 function buildServer(env: Env) {
@@ -223,6 +319,30 @@ export default {
       });
     }
 
+    if (request.method === "POST" && url.pathname === "/self-test/run") {
+      if (!env.APEX_RELAY_TOKEN) {
+        return diagnostic({
+          result: "FAIL",
+          stage: "WORKER_CONFIG",
+          reason: "APEX_RELAY_TOKEN_MISSING",
+          model: ALLOWED_MODEL,
+          openai_response_id: null,
+          request_sha256: null,
+        }, 500);
+      }
+      if (!bearerAuthorized(request, env)) {
+        return diagnostic({
+          result: "FAIL",
+          stage: "TOKEN_GATE",
+          reason: "UNAUTHORIZED",
+          model: ALLOWED_MODEL,
+          openai_response_id: null,
+          request_sha256: null,
+        }, 401);
+      }
+      return runSelfTest(env);
+    }
+
     if (!env.APEX_RELAY_TOKEN) {
       return new Response("APEX_RELAY_TOKEN_MISSING", {
         status: 500,
@@ -232,10 +352,6 @@ export default {
 
     if (!bearerAuthorized(request, env)) {
       return unauthorized();
-    }
-
-    if (request.method === "POST" && url.pathname === "/self-test/run") {
-      return runSelfTest(env);
     }
 
     return createMcpHandler(buildServer(env))(request, env, ctx);
