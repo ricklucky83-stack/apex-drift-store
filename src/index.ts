@@ -9,11 +9,146 @@ interface Env {
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const ALLOWED_MODEL = "gpt-6-astra";
+const RELAY_VERSION = "1.2.0";
+const SELF_TEST_OK = "APEX_RELAY_OK";
+
+const SELF_TEST_HTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>APEX GPT-6 Relay Self-Test</title>
+  <style>
+    body{font-family:system-ui,-apple-system,sans-serif;max-width:640px;margin:48px auto;padding:0 18px;background:#0b0d10;color:#f4f6f8}
+    .card{background:#151922;border:1px solid #2b3240;border-radius:14px;padding:22px}
+    input,button{box-sizing:border-box;width:100%;font:inherit;border-radius:9px;padding:12px}
+    input{background:#0f131a;color:#fff;border:1px solid #3a4456;margin:10px 0 12px}
+    button{border:0;background:#fff;color:#111;font-weight:700;cursor:pointer}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0f131a;border-radius:9px;padding:12px;min-height:64px}
+    small{color:#aeb7c5}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>APEX GPT-6 Relay Self-Test</h1>
+    <small>Relay ${RELAY_VERSION}. Token is sent only in the Authorization Bearer header and is never placed in the URL.</small>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste APEX_RELAY_TOKEN" />
+    <button id="run">Run self-test</button>
+    <pre id="out">READY</pre>
+  </div>
+  <script>
+    const tokenEl = document.getElementById('token');
+    const outEl = document.getElementById('out');
+    const runEl = document.getElementById('run');
+    runEl.addEventListener('click', async () => {
+      const token = tokenEl.value;
+      if (!token) { outEl.textContent = 'FAIL'; return; }
+      runEl.disabled = true;
+      outEl.textContent = 'RUNNING';
+      try {
+        const r = await fetch('/self-test/run', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token },
+          cache: 'no-store'
+        });
+        const j = await r.json();
+        outEl.textContent = JSON.stringify(j, null, 2);
+      } catch (_) {
+        outEl.textContent = JSON.stringify({ result: 'FAIL' }, null, 2);
+      } finally {
+        runEl.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>`;
+
+function bearerAuthorized(request: Request, env: Env): boolean {
+  if (!env.APEX_RELAY_TOKEN) return false;
+  const authorization = request.headers.get("Authorization") ?? "";
+  return authorization === `Bearer ${env.APEX_RELAY_TOKEN}`;
+}
+
+function unauthorized(): Response {
+  return new Response("Unauthorized", {
+    status: 401,
+    headers: {
+      "Cache-Control": "no-store",
+      "WWW-Authenticate": 'Bearer realm="APEX GPT-6 Transport"',
+    },
+  });
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function extractOutputText(obj: any): string {
+  if (typeof obj?.output_text === "string") return obj.output_text;
+  const parts: string[] = [];
+  for (const item of Array.isArray(obj?.output) ? obj.output : []) {
+    for (const content of Array.isArray(item?.content) ? item.content : []) {
+      if (typeof content?.text === "string") parts.push(content.text);
+    }
+  }
+  return parts.join("");
+}
+
+async function runSelfTest(env: Env): Promise<Response> {
+  const payload = {
+    model: ALLOWED_MODEL,
+    reasoning: { effort: "low" },
+    input: "Reply with exactly APEX_RELAY_OK and nothing else.",
+    max_output_tokens: 20,
+  };
+  const body = JSON.stringify(payload);
+  const requestSha = await sha256Hex(body);
+
+  let openaiResponseId: string | null = null;
+  let result: "PASS" | "FAIL" = "FAIL";
+
+  if (env.OPENAI_API_KEY) {
+    try {
+      const upstream = await fetch(OPENAI_RESPONSES_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body,
+      });
+
+      const text = await upstream.text();
+      if (upstream.ok) {
+        try {
+          const obj = JSON.parse(text);
+          openaiResponseId = typeof obj?.id === "string" ? obj.id : null;
+          result = extractOutputText(obj).trim() === SELF_TEST_OK ? "PASS" : "FAIL";
+        } catch {
+          result = "FAIL";
+        }
+      }
+    } catch {
+      result = "FAIL";
+    }
+  }
+
+  return Response.json(
+    {
+      result,
+      model: ALLOWED_MODEL,
+      openai_response_id: openaiResponseId,
+      request_sha256: requestSha,
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
 
 function buildServer(env: Env) {
   const server = new McpServer({
     name: "APEX GPT-6 Transport",
-    version: "1.1.0",
+    version: RELAY_VERSION,
   });
 
   server.registerTool(
@@ -76,6 +211,18 @@ function buildServer(env: Env) {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/self-test") {
+      return new Response(SELF_TEST_HTML, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+        },
+      });
+    }
+
     if (!env.APEX_RELAY_TOKEN) {
       return new Response("APEX_RELAY_TOKEN_MISSING", {
         status: 500,
@@ -83,15 +230,12 @@ export default {
       });
     }
 
-    const authorization = request.headers.get("Authorization") ?? "";
-    if (authorization !== `Bearer ${env.APEX_RELAY_TOKEN}`) {
-      return new Response("Unauthorized", {
-        status: 401,
-        headers: {
-          "Cache-Control": "no-store",
-          "WWW-Authenticate": 'Bearer realm="APEX GPT-6 Transport"',
-        },
-      });
+    if (!bearerAuthorized(request, env)) {
+      return unauthorized();
+    }
+
+    if (request.method === "POST" && url.pathname === "/self-test/run") {
+      return runSelfTest(env);
     }
 
     return createMcpHandler(buildServer(env))(request, env, ctx);
