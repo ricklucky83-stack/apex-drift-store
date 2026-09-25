@@ -1,0 +1,47 @@
+{
+  "patch_id": "APEX_CANONICAL_EXECUTION_PROOF_GUARD_v1",
+  "scope": ["GLOBAL_EXECUTION_REPORTING", "NFL_SS_YARDS_PRESEAL"],
+  "purpose": "Fail closed unless a board proves canonical engine execution with machine provenance; prohibit chat-built substitute simulations/selectors from being reported as executed or sealed.",
+  "github": {
+    "guard_path": "guards/apex_execution_proof_guard_v1.py",
+    "guard_commit": "25f3123382295855cc18211c5dc69f75265afa16",
+    "guard_blob_sha": "b2e2b3d893d9b2cc30f4e9a7aac53c699c1425b0",
+    "tests_path": "tests/test_apex_execution_proof_guard_v1.py",
+    "tests_commit": "585ae9a2c9732f39962641fdf0fc2a2aa671867b",
+    "tests_blob_sha": "16acee3627350e778e10a4cb02965cb4bd841261"
+  },
+  "required_machine_provenance": [
+    "sport",
+    "mode",
+    "engine_version",
+    "runtime_id",
+    "bundle_sha256",
+    "engine_sha256",
+    "selector_id",
+    "mc_worlds",
+    "public_field_sims",
+    "machine_receipt_sha256",
+    "engine_owned_board",
+    "chat_synthesized"
+  ],
+  "nfl_ss_yards_requirements": {
+    "runtime_id": "APEX_NFL_SS_YARDS_CHUNK_STREAM_RUNTIME_v1",
+    "stat_authority": "RUSHING_PLUS_RECEIVING_YARDS",
+    "passing_yards_enabled": false,
+    "qb_eligible": false,
+    "k_dst_eligible": false,
+    "requested_board_size_exact": true,
+    "requested_field_size_exact": true
+  },
+  "failure_action": "RUN_INVALID_NO_BOARD",
+  "regression": {
+    "environment": "local execution of exact GitHub read-back source",
+    "tests": 8,
+    "passed": 8,
+    "failed": 0
+  },
+  "production_bundle_integrated": false,
+  "production_pointer_advanced": false,
+  "production_execution_proven": false,
+  "next_required_proof": "Import and execute this guard in the canonical production runner immediately before board seal; then regenerate bundle/hash, advance pointer, and read back the machine receipt."
+}
