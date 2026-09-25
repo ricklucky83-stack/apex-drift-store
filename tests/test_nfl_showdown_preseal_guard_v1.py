@@ -2,7 +2,7 @@ from guards.nfl_showdown_preseal_guard_v1 import SDLineup, PresealViolation, pre
 
 SAL = {
     "A":10000,"B":9000,"C":8000,"D":7000,"E":6000,"F":5000,
-    "G":4000,"H":3000,"I":2000,"J":1000
+    "G":4000,"H":3000,"I":2000,"J":1000,"K":6000
 }
 GOOD_RECEIPT = {
     "engine_version":"1.33.403",
@@ -22,7 +22,7 @@ def expect_fail(fn):
     raise AssertionError("expected PresealViolation")
 
 def test_over_cap_rejected():
-    lu = SDLineup("A",("B","C","D","E","F"),SAL,"shootout")
+    lu = SDLineup("A",("B","C","D","E","K"),SAL,"shootout")
     expect_fail(lambda: preseal_nfl_showdown([lu], GOOD_RECEIPT, 1))
 
 def test_missing_provenance_rejected():
