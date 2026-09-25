@@ -1,0 +1,26 @@
+{
+  "patch_id": "NFL_SD_PRESEAL_INTEGRITY_AND_COVERAGE_GUARD_v1",
+  "parent_state": "1.33.403",
+  "scope": "NFL_SHOWDOWN",
+  "mode": "MAX_ENTRY_AND_SINGLE_ENTRY",
+  "fail_closed": true,
+  "guards": {
+    "exact_cpt_salary_multiplier": 1.5,
+    "salary_min": 40000,
+    "salary_max": 50000,
+    "exact_lineup_uniqueness": true,
+    "requested_board_size_exact": true,
+    "machine_provenance_required": true,
+    "mc_worlds_positive": true,
+    "public_field_sims_positive": true,
+    "large_board_min_unique_captains": 4,
+    "large_board_min_script_families": 4,
+    "large_board_max_three_player_core_share": 0.85,
+    "concentration_override_requires_explicit_receipt": true
+  },
+  "failure_action": "RUN_INVALID_NO_BOARD",
+  "code_commit": "4f8a9ea4f2f268876770d9474229e31c376641a8",
+  "tests_commit": "58269ad61f9c48a8a80a670fde69031a280bb785",
+  "production_bundle_mutated": false,
+  "production_integration_requirement": "CURRENT NFL Showdown bundle must import and execute this guard immediately before terminal seal; until then chat/runtime must fail closed rather than synthesize a board."
+}
